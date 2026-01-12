@@ -1,30 +1,72 @@
-from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
-from src.books.routes import book_router
-from contextlib import asynccontextmanager
-from src.db.main import init_db
-from src.auth.routes import auth_router
-from src.reviews.routes import review_router
-from .errors import (
-    create_exception_handler,
-    InvalidCredentials,
-    BookNotFound,
-    UserAlreadyExists,
-    UserNotFound,
-    InsufficientPermission,
-    AccessTokenRequired,
-    InvalidToken,
-    RefreshTokenRequired,
-    RevokedToken,
-    BooklyException,
-    AccountNotVerified
-)
-
 from typing import Any, Callable
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
+from fastapi import FastAPI, status
 from sqlalchemy.exc import SQLAlchemyError
 
+class BooklyException(Exception):
+    """This is the base class for all bookly errors"""
+
+    pass
+
+
+class InvalidToken(BooklyException):
+    """User has provided an invalid or expired token"""
+
+    pass
+
+
+class RevokedToken(BooklyException):
+    """User has provided a token that has been revoked"""
+
+    pass
+
+
+class AccessTokenRequired(BooklyException):
+    """User has provided a refresh token when an access token is needed"""
+
+    pass
+
+
+class RefreshTokenRequired(BooklyException):
+    """User has provided an access token when a refresh token is needed"""
+
+    pass
+
+
+class UserAlreadyExists(BooklyException):
+    """User has provided an email for a user who exists during sign up."""
+
+    pass
+
+
+class InvalidCredentials(BooklyException):
+    """User has provided wrong email or password during log in."""
+
+    pass
+
+
+class InsufficientPermission(BooklyException):
+    """User does not have the neccessary permissions to perform an action."""
+
+    pass
+
+
+class BookNotFound(BooklyException):
+    """Book Not found"""
+
+    pass
+
+
+class UserNotFound(BooklyException):
+    """User Not found"""
+
+    pass
+
+
+class AccountNotVerified(BooklyException):
+    """Account not yet verified"""
+    pass
 
 def create_exception_handler(
     status_code: int, initial_detail: Any
@@ -59,7 +101,16 @@ def register_all_errors(app: FastAPI):
             },
         ),
     )
- 
+    app.add_exception_handler(
+        BookNotFound,
+        create_exception_handler(
+            status_code=status.HTTP_404_NOT_FOUND,
+            initial_detail={
+                "message": "Book not found",
+                "error_code": "book_not_found",
+            },
+        ),
+    )
     app.add_exception_handler(
         InvalidCredentials,
         create_exception_handler(
@@ -148,49 +199,25 @@ def register_all_errors(app: FastAPI):
         ),
     )
 
+    @app.exception_handler(500)
+    async def internal_server_error(request, exc):
+
+        return JSONResponse(
+            content={
+                "message": "Oops! Something went wrong",
+                "error_code": "server_error",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-
-
-@asynccontextmanager
-async def life_span(app:FastAPI):    #take in one important attribute
-    print(f"Server is starting...!")
-    from src.db.models import Book
-    
-    await init_db()
-    yield
-    print(f"Server has been stopped :(")
-
-version = "v1"
-
-app = FastAPI(
-    title="Bookly",
-    description="A REST API for a book review web service",
-    version= version,
-    docs_url=f"/api/{version}/docs",
-    redoc_url=f"/api/{version}/docs",
-
-    contact={
-        "email":"jaycegoh12@gmail.com"
-    }
-)
-
-register_all_errors(app)
-
-#now is register middlware
-from .middleware import register_middleware
-
-register_middleware(app)
-
-
-#take in other errors like smt/0, creating error handler
-@app.exception_handler(500)
-async def internal_server_error(request,exc): #exc means exception
-    return JSONResponse(
-        content={"message":"Oops, something went wrong!", "error_code":"server_error"},
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-    )
-
-app.include_router(book_router, prefix=f"/api/{version}/books",tags=['books'])
-app.include_router(auth_router, prefix=f"/api/{version}/auth",tags=['auth'])
-app.include_router(review_router, prefix=f"/api/{version}/reviews",tags=['reviews'])
+    @app.exception_handler(SQLAlchemyError)
+    async def database__error(request, exc):
+        print(str(exc))
+        return JSONResponse(
+            content={
+                "message": "Oops! Something went wrong",
+                "error_code": "server_error",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
